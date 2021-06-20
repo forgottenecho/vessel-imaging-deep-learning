@@ -51,15 +51,16 @@ while i < 4:
     i += 1
 
 
+final_concat = previous_smashed_together
 
-# right1 = layers.Conv2D(64, 3, activation='relu', kernel_initializer=initializers.HeNormal)(right1)
-# right1 = layers.Conv2D(64, 3, activation='relu', kernel_initializer=initializers.HeNormal)(right1)
+conv = layers.Conv2D(number_of_filters, 3, activation='relu', kernel_initializer=initializers.HeNormal)(final_concat)
+conv = layers.Conv2D(number_of_filters, 3, activation='relu', kernel_initializer=initializers.HeNormal)(conv)
 
-# output = layers.Conv2D(K, 1, activation='softmax', kernel_initializer=initializers.HeNormal, name='maps')(right1)
+output = layers.Conv2D(K, 1, activation='softmax', kernel_initializer=initializers.HeNormal, name='maps')(conv)
 
 
 
-model = Model(input, previous_smashed_together)
+model = Model(input, output)
 model.summary()
 model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy','val_accuracy'])
 
