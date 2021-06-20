@@ -39,6 +39,14 @@ class Unet(Model):
         output = layers.Conv2D(K, 1, activation='softmax', kernel_initializer=kernel_initializer, name='maps')(conv)
 
         super().__init__(input, output)
+    
+    # allows model to make predictions on arbitraily sized inputs
+    def any_size_predict():
+        pass
+
+    # allows model to train on arbitraily sized input
+    def any_size_fit():
+        pass
 
     def _contracting_block(self, previous_down, number_of_filters, kernel_size=3, activation='relu', kernel_initializer=initializers.HeNormal, padding='same'):
         right_convolution = layers.Conv2D(number_of_filters, kernel_size, activation=activation, kernel_initializer=kernel_initializer, padding=padding)(previous_down)
