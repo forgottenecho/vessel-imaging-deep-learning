@@ -58,10 +58,15 @@ class Unet(Model):
 
 
 if __name__ == "__main__":
-    
+
+    # convolutions are valid, so output image is smaller than input image
     model = Unet(input_shape=(572, 572, 1), K=3, padding='valid')
     model.summary()
     model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy','val_accuracy'])
+    
 
 
-    #model.predict(np.empty((3,572,572,1)))
+    # convolutions are padded to produce same size output image
+    model2 = Unet(input_shape=(1024, 1024, 1), K=3)
+    model2.summary()
+    model2.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy','val_accuracy'])
