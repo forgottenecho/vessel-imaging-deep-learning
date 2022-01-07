@@ -1,9 +1,6 @@
 # my implementation of Ronneberger's U-Net
 # for expansion half of network, used resizing instead of cropping before concatenation
-# loss function is pure binary_crossentropy, have not included pixel weight map yet
-# used adam optimizer instead of pure sgd
-
-# number of classes
+# loss function does not included pixel weight map yet
 
 import tensorflow as tf
 from tensorflow.keras import Model, Input, layers, initializers
@@ -20,10 +17,10 @@ class ContractingBlock(keras.layers.Layer):
     
     def call(self, inputs):
         x = self.conv1(inputs)
-        x = self.conv2(x)
-        outputs = self.pool(x) # downsample
+        cross_connection = self.conv2(x)
+        outputs = self.pool(cross_connection) # downsample
 
-        return outputs
+        return outputs, cross_connection
 
 class ExpandingBlock(keras.layers.Layer):
     def __init__(self, number_of_filters, kernel_size=3, activation='relu', kernel_initializer=initializers.HeNormal, padding='same'):
@@ -44,86 +41,74 @@ class ExpandingBlock(keras.layers.Layer):
 
         return outputs
 
-class Unet(Model):
-    def __init__(self, input_shape, K, starting_number_of_filters=64, levels=4, activation='relu', kernel_initializer=initializers.HeNormal, padding='same'):
+class Unet(keras.Model):
+    def __init__(self, K, starting_number_of_filters=64, levels=4, activation='relu', kernel_initializer=initializers.HeNormal, padding='same'):
         super().__init__()
-        self.K = K
-        input = Input(shape = input_shape)
-        
-        number_of_filters = starting_number_of_filters
-        counterparts = []
-        previous_down = input
-        
-        for i in range(levels):
-            down, counterpart = self._contracting_block(previous_down, number_of_filters, activation=activation, kernel_initializer=kernel_initializer, padding=padding)
-            counterparts.insert(0, counterpart)
 
-            number_of_filters *= 2
-            previous_down = down
-
-        previous_smashed_together = previous_down
-
-        for i in range(levels):
-            smashed_together = self._expanding_block(previous_smashed_together, counterparts[i], number_of_filters, activation=activation, kernel_initializer=kernel_initializer, padding=padding)
-
-            number_of_filters /= 2
-            previous_smashed_together = smashed_together
-
-        final_concat = previous_smashed_together
-        conv = layers.Conv2D(number_of_filters, 3, activation=activation, kernel_initializer=kernel_initializer, padding=padding)(final_concat)
-        conv = layers.Conv2D(number_of_filters, 3, activation=activation, kernel_initializer=kernel_initializer, padding=padding)(conv)
-        output = layers.Conv2D(K, 1, activation='softmax', kernel_initializer=kernel_initializer, name='maps')(conv)
-
-        super().__init__(input, output)
+        self.K = K # number of output classes
+        self.con_blocks = [ContractingBlock(starting_number_of_filters*2**i, activation=activation, kernel_initializer=kernel_initializer, padding=padding) for i in range(levels)]
+        self.exp_blocks = [ExpandingBlock(starting_number_of_filters*2**i, activation=activation, kernel_initializer=kernel_initializer, padding=padding) for i in range(levels, 0, -1)]
+        self.conv1 = keras.layers.Conv2D(starting_number_of_filters, 3, activation=activation, kernel_initializer=kernel_initializer, padding=padding)
+        self.conv2 = keras.layers.Conv2D(starting_number_of_filters, 3, activation=activation, kernel_initializer=kernel_initializer, padding=padding)
+        self.maps = keras.layers.Conv2D(K, 1, activation='softmax', kernel_initializer=kernel_initializer)
     
-    # allows model to make predictions on arbitraily sized inputs
-    def any_size_predict():
-        pass
+    def call(self, inputs):
+        # run the contracting half
+        cross_inputs = []
+        x = inputs
+        for con in self.con_blocks:
+            x, cross_connection = con(x)
+            # print('Contract output shape: ', x.shape)
 
-    # allows model to train on arbitraily sized input
-    def any_size_fit():
-        pass
+            # save the pre-pooled output to pipe into the expanidng half
+            cross_inputs.insert(0, cross_connection)
+        
+        # run the expanding half
+        for i, exp in enumerate(self.exp_blocks):
+            x = exp(x, cross_inputs[i])
+            # print('Connection shape: ', cross_inputs[i].shape)
+            # print('Exp output shape: ', x.shape)
+        
+        # do the final convolutions to get the segmentations
+        x = self.conv1(x)
+        x = self.conv2(x)
+        outputs = self.maps(x)
+        # print('Final output shape: ', outputs.shape)
 
-    def _contracting_block(self, previous_down, number_of_filters, kernel_size=3, activation='relu', kernel_initializer=initializers.HeNormal, padding='same'):
-        right_convolution = layers.Conv2D(number_of_filters, kernel_size, activation=activation, kernel_initializer=kernel_initializer, padding=padding)(previous_down)
-        right_convolution = layers.Conv2D(number_of_filters, kernel_size, activation=activation, kernel_initializer=kernel_initializer, padding=padding)(right_convolution)
-        down = layers.MaxPool2D()(right_convolution)
-
-        return down, right_convolution
-
-    def _expanding_block(self, previous_smashed_together, contracting_counterpart, number_of_filters, kernel_size=3, activation='relu', kernel_initializer=initializers.HeNormal, padding='same'):
-        right_convolution = layers.Conv2D(number_of_filters, kernel_size, activation=activation, kernel_initializer=kernel_initializer, padding=padding)(previous_smashed_together)
-        right_convolution = layers.Conv2D(number_of_filters, kernel_size, activation=activation, kernel_initializer=kernel_initializer, padding=padding)(right_convolution)
-        up = layers.Conv2DTranspose(number_of_filters/2, 2, strides=2, activation=activation, kernel_initializer=kernel_initializer)(right_convolution)
-        smashed_together = layers.Concatenate()([tf.image.resize(contracting_counterpart, up.shape[1:3]), up])
-
-        return smashed_together
-
-
+        return outputs
 
 if __name__ == "__main__":
-    # this example is the bottom part of the original unet from the whitepaper
-    inputs = np.random.random((5,68,68,256))
+    # # this example is the bottom part of the original unet from the whitepaper
+    # inputs = np.random.random((5,68,68,256))
 
-    # test contracting block
-    con = ContractingBlock(512, padding='valid')
-    first_out = con(inputs)
-    print(first_out.shape) # should be (5, 32, 32, 512)
+    # # test contracting block
+    # con = ContractingBlock(512, padding='valid')
+    # first_out = con(inputs)
+    # print(first_out.shape) # should be (5, 32, 32, 512)
 
-    # test expanding block
-    counterpart = first_out
-    exp = ExpandingBlock(1024, padding='valid')
-    second_out = exp(first_out, counterpart)
-    print(second_out.shape) # should be (5, 56, 56, 1024)
+    # # test expanding block
+    # counterpart = first_out
+    # exp = ExpandingBlock(1024, padding='valid')
+    # second_out = exp(first_out, counterpart)
+    # print(second_out[0].shape) # should be (5, 56, 56, 1024)
 
-    # # convolutions are valid, so output image is smaller than input image
-    # model = Unet(input_shape=(572, 572, 1), K=3, padding='valid')
-    # model.summary()
-    # model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy','val_accuracy'])
+    # this is the paper's unet, matches perfectly (uncomment print statements in unet implementation to verify)
+    x = np.random.random((5, 572, 572, 1))
+    model = Unet(K=2, padding='valid')
+    y = model.predict(x)
+
+    # convolutions are valid, so output image is smaller than input image
+    print(y.shape)
+
+    # a unet with same padding, segmentation map does not shrink if height and width
+    # are both divisible by 2**num_of_layers
+    x = np.random.random((5, 512, 512, 4))
+    model = Unet(K=3)
+    y = model.predict(x)
+
+    # convolutions are padded to produce same size output image
+    print(y.shape)
+    model.summary()
     
-
-
-    # # convolutions are padded to produce same size output image
-    # model2 = Unet(input_shape=(1024, 1024, 1), K=3)
-    # model2.summary()
-    # model2.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy','val_accuracy'])
+    # you can use compile and fit just like any tensorflow Model obj
+    model.compile(optimizer='adam', loss='mse', metrics=['accuracy','val_accuracy'])
